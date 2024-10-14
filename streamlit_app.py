@@ -1,151 +1,86 @@
+"""
+@ANSI636014090102DL00410278ZC03190024DLDAQY3503753DCSBARBIERIDDENDACNICOLASDDFNDADNONEDDGNDCACDCBNONEDCDNONEDBD01102019DBB09111994DBA09112020DBC1DAU070 INDAYGRNDAG1927 17TH TDAISANTAMONICADAJCADAK904040000CF10/6/201561638/BBFD/20DCGUSADAW184DAZBRODCK19010Y35037530401DDANDDB08292017ZCZCAGRNZCBBRNZCCZCD
+"""
+import re
+from datetime import datetime
 import streamlit as st
-import pandas as pd
-import math
+import csv
 from pathlib import Path
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
+# Helper function to append data to a CSV file
+def log_to_csv(log_data):
+    log_file_path = 'log.csv'
+    file_exists = Path(log_file_path).exists()
+    with open(log_file_path, 'a', newline='') as csvfile:
+        headers = ['Timestamp', 'ID Number', 'Date of Birth', 'Age']
+        writer = csv.DictWriter(csvfile, fieldnames=headers)
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+        if not file_exists:
+            writer.writeheader()  # Write header only once
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+        writer.writerow(log_data)
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+def extract_dob(text):
+    """Extracts the date of birth (DOB) from the driver's license text."""
+    pattern = r'DBB(\d{8})'
+    match = re.search(pattern, text)
+    if match:
+        dob_str = match.group(1)
+        try:
+            dob = datetime.strptime(dob_str, '%m%d%Y')
+            return dob
+        except ValueError as e:
+            st.error(f"Date conversion error: {e}")
+            return None
+    return None
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+def extract_id(text):
+    """Extracts the ID number following 'DLDAQ' that starts with 'Y' and is followed by seven digits."""
+    match = re.search(r'DLDAQ(Y\d{7})', text)
+    return match.group(1) if match else None
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+def calculate_age(dob):
+    """Calculates the age given a date of birth."""
+    today = datetime.today()
+    age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+    return age
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
+def display_age_check(dob, age):
+    """Displays a large green check or red X based on age, with the age number displayed in large font next to the symbol."""
+    if age >= 21:
+        symbol = "✔️"
+        color = "green"
+    else:
+        symbol = "❌"
+        color = "red"
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
+    html_content = f"<span style='font-size: 150pt; color: {color};'>{symbol}</span> <span style='color: {color};'>Age: </span><span style='font-size: 150pt; color: {color};'>{age}</span><br>"
+    html_content += f"<span style='font-size: 50pt; color: {color};'>Birthdate: {dob.strftime('%B %d, %Y')}</span>"
+    st.markdown(html_content, unsafe_allow_html=True)
 
-    return gdp_df
+st.title('Driver\'s License DOB Extractor and Age Calculator')
+text_input = st.text_area("Enter scanned text data containing DBB<YYYYMMDD>:", height=150, max_chars=1000, key="text_input")
 
-gdp_df = get_gdp_data()
+def clear_text():
+    st.session_state.text_input = ""
 
-# -----------------------------------------------------------------------------
-# Draw the actual page
+if st.button("Clear", on_click=clear_text):
+    clear_text()
 
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+if text_input:
+    dob = extract_dob(text_input)
+    if dob:
+        age = calculate_age(dob)
+        id_number = extract_id(text_input)
+        if id_number:
+            # Log the data
+            log_data = {
+                'Timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'ID Number': id_number,
+                'Date of Birth': dob.strftime('%Y-%m-%d'),
+                'Age': age
+            }
+            log_to_csv(log_data)
+        display_age_check(dob, age)
+    else:
+        st.error('DOB not found in the text data or invalid format.')
